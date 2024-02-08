@@ -30,7 +30,17 @@ source_environment_tempfile="$stage/source_environment.sh"
 LUAU_VERSION="0.609"
 build=${AUTOBUILD_BUILD_ID:=0}
 
+mkdir -p "$stage/include/luau"
+mkdir -p "$stage/lib/release"
+
 pushd "$top/luau"
+    pushd "VM/include"
+    cp -v lua.h luaconf.h lualib.h "$stage/include/luau/"
+    popd
+    pushd "Compiler/include"
+    cp -v luacode.h "$stage/include/luau/"
+    popd
+
     case "$AUTOBUILD_PLATFORM" in
         windows*)
             set -o igncr
@@ -43,15 +53,8 @@ pushd "$top/luau"
             cmake --build . -- /p:Configuration=Release
             cmake --build . --target Luau.Repl.CLI -- /p:Configuration=Release
 
-            mkdir -p "$stage/include/luau"
-            mkdir -p "$stage/lib/release"
             mkdir -p "$stage/bin"
-            pushd "VM/include"
-            cp -v lua.h luaconf.h lualib.h "$stage/include/luau/"
-            popd
-            pushd "Compiler/include"
-            cp -v luacode.h "$stage/include/luau/"
-            popd
+
             cp -v "Release/isocline.lib" "$stage/lib/release/"
             cp -v "Release/Luau.Ast.lib" "$stage/lib/release/"
             cp -v "Release/Luau.CodeGen.lib" "$stage/lib/release/"
@@ -59,6 +62,16 @@ pushd "$top/luau"
             cp -v "Release/Luau.Config.lib" "$stage/lib/release/"
 
             cp -v Release/luau.exe "$stage/bin/"
+        ;;
+        darwin*)
+            cmake . -DCMAKE_INSTALL_PREFIX:STRING="${stage}"
+            cmake --build . --target Luau.Repl.CLI
+
+            cp -v "libLuau.Ast.a" "$stage/lib/release"
+            cp -v "libLuau.CodeGen.a" "$stage/lib/release"
+            cp -v "libLuau.Compiler.a" "$stage/lib/release"
+            cp -v "libLuau.Config.a" "$stage/lib/release"
+            cp -v "libLuau.VM.a" "$stage/lib/release"
         ;;
     esac
 popd
