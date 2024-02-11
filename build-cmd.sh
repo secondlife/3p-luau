@@ -73,6 +73,20 @@ pushd "$top/luau"
             cp -v "libLuau.Config.a" "$stage/lib/release"
             cp -v "libLuau.VM.a" "$stage/lib/release"
         ;;
+        linux64)
+            # Don't litter the source directory with build artifacts
+            mkdir -p ../build
+            pushd ../build
+                cmake ../luau -DCMAKE_INSTALL_PREFIX:STRING="${stage}"
+                cmake --build . --target Luau.Repl.CLI
+
+                cp -v "libLuau.Ast.a" "$stage/lib/release"
+                cp -v "libLuau.CodeGen.a" "$stage/lib/release"
+                cp -v "libLuau.Compiler.a" "$stage/lib/release"
+                cp -v "libLuau.Config.a" "$stage/lib/release"
+                cp -v "libLuau.VM.a" "$stage/lib/release"
+            popd
+        ;;
     esac
 popd
 
