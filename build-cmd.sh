@@ -85,6 +85,6 @@ pushd "$top/luau"
     esac
 popd
 
-echo "$LUAU_VERSION.$build" > "$stage/VERSION.txt"
+echo "$LUAU_VERSION-$build" > "$stage/VERSION.txt"
 mkdir -p "$stage/LICENSES"
 cp "$top/LICENSE" "$stage/LICENSES/luau.txt"
