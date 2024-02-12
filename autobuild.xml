@@ -88,6 +88,25 @@
           <key>name</key>
           <string>darwin</string>
         </map>
+        <key>linux64</key>
+        <map>
+          <key>configurations</key>
+          <map>
+            <key>default</key>
+            <map>
+              <key>default</key>
+              <boolean>true</boolean>
+              <key>name</key>
+              <string>default</string>
+            </map>
+          </map>
+          <key>manifest</key>
+          <array>
+            <string>lib</string>
+          </array>
+          <key>name</key>
+          <string>darwin</string>
+        </map>
       </map>
       <key>source_directory</key>
       <string>lua</string>
