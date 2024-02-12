@@ -27,6 +27,9 @@ source_environment_tempfile="$stage/source_environment.sh"
 "$autobuild" source_environment > "$source_environment_tempfile"
 . "$source_environment_tempfile"
 
+# remove_cxxstd
+source "$(dirname "$AUTOBUILD_VARIABLES_FILE")/functions"
+
 LUAU_VERSION="0.609"
 build=${AUTOBUILD_BUILD_ID:=0}
 
@@ -41,15 +44,18 @@ pushd "$top/luau"
     cp -v luacode.h "$stage/include/luau/"
     popd
 
+    # Don't litter the source directory with build artifacts
+    mkdir -p ../build
+    cd ../build
     case "$AUTOBUILD_PLATFORM" in
         windows*)
             set -o igncr
             opts="$LL_BUILD_RELEASE /EHsc"
             cmake -G "$AUTOBUILD_WIN_CMAKE_GEN" -A "$AUTOBUILD_WIN_VSPLATFORM" \
                   -DCMAKE_INSTALL_PREFIX="$(cygpath -m "$stage")" \
-                  -DCMAKE_C_FLAGS="$opts" \
+                  -DCMAKE_C_FLAGS="$(remove_cxxstd $opts)" \
                   -DCMAKE_CXX_FLAGS="$opts" \
-                  .
+                  ../luau
             cmake --build . -- /p:Configuration=Release
             cmake --build . --target Luau.Repl.CLI -- /p:Configuration=Release
 
@@ -63,8 +69,11 @@ pushd "$top/luau"
 
             cp -v Release/luau.exe "$stage/bin/"
         ;;
-        darwin*)
-            cmake . -DCMAKE_INSTALL_PREFIX:STRING="${stage}"
+        darwin*|linux64*)
+            cmake -DCMAKE_INSTALL_PREFIX:STRING="${stage}" \
+                  -DCMAKE_CXX_FLAGS="$LL_BUILD_RELEASE" \
+                  -DCMAKE_C_FLAGS="$(remove_cxxstd $LL_BUILD_RELEASE)" \
+                  ../luau
             cmake --build . --target Luau.Repl.CLI
 
             cp -v "libLuau.Ast.a" "$stage/lib/release"
@@ -72,20 +81,6 @@ pushd "$top/luau"
             cp -v "libLuau.Compiler.a" "$stage/lib/release"
             cp -v "libLuau.Config.a" "$stage/lib/release"
             cp -v "libLuau.VM.a" "$stage/lib/release"
-        ;;
-        linux64)
-            # Don't litter the source directory with build artifacts
-            mkdir -p ../build
-            pushd ../build
-                cmake ../luau -DCMAKE_INSTALL_PREFIX:STRING="${stage}"
-                cmake --build . --target Luau.Repl.CLI
-
-                cp -v "libLuau.Ast.a" "$stage/lib/release"
-                cp -v "libLuau.CodeGen.a" "$stage/lib/release"
-                cp -v "libLuau.Compiler.a" "$stage/lib/release"
-                cp -v "libLuau.Config.a" "$stage/lib/release"
-                cp -v "libLuau.VM.a" "$stage/lib/release"
-            popd
         ;;
     esac
 popd
