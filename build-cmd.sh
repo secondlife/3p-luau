@@ -13,7 +13,7 @@ if [ -z "$AUTOBUILD" ] ; then
     exit 1
 fi
 
-if [ "$OSTYPE" = "cygwin" ] ; then
+if [[ "$OSTYPE" == "cygwin" || "$OSTYPE" == "msys" ]] ; then
     autobuild="$(cygpath -u $AUTOBUILD)"
 else
     autobuild="$AUTOBUILD"
@@ -29,9 +29,6 @@ source_environment_tempfile="$stage/source_environment.sh"
 
 # remove_cxxstd
 source "$(dirname "$AUTOBUILD_VARIABLES_FILE")/functions"
-
-LUAU_VERSION="0.609"
-build=${AUTOBUILD_BUILD_ID:=0}
 
 mkdir -p "$stage/include/luau"
 mkdir -p "$stage/lib/release"
@@ -50,31 +47,102 @@ pushd "$top/luau"
     case "$AUTOBUILD_PLATFORM" in
         windows*)
             set -o igncr
-            opts="$LL_BUILD_RELEASE /EHsc"
-            cmake -G "$AUTOBUILD_WIN_CMAKE_GEN" -A "$AUTOBUILD_WIN_VSPLATFORM" \
+            opts="$(replace_switch /Zi /Z7 $LL_BUILD_RELEASE) /EHsc"
+            plainopts="$(remove_switch /GR $(remove_cxxstd $opts))"
+
+            cmake -G "Ninja" -DCMAKE_BUILD_TYPE="Release" \
                   -DCMAKE_INSTALL_PREFIX="$(cygpath -m "$stage")" \
                   -DCMAKE_C_FLAGS="$(remove_cxxstd $opts)" \
                   -DCMAKE_CXX_FLAGS="$opts" \
                   ../luau
-            cmake --build . -- /p:Configuration=Release
-            cmake --build . --target Luau.Repl.CLI -- /p:Configuration=Release
+            cmake --build . --config Release
+
+            # conditionally run unit tests
+            if [ "${DISABLE_UNIT_TESTS:-0}" = "0" ]; then
+                ./Luau.UnitTest.exe
+                ./Luau.Conformance.exe
+                ./Luau.UnitTest.exe --fflags=true
+                ./Luau.Conformance.exe --fflags=true
+                ./Luau.Conformance.exe -O2
+                ./Luau.Conformance.exe -O2 --fflags=true
+                ./Luau.Conformance.exe --codegen
+                ./Luau.Conformance.exe --codegen --fflags=true
+                ./Luau.Conformance.exe --codegen -O2
+                ./Luau.Conformance.exe --codegen -O2 --fflags=true
+                ./luau ../luau/tests/conformance/assert.lua
+                ./luau-analyze ../luau/tests/conformance/assert.lua
+                ./luau-compile ../luau/tests/conformance/assert.lua
+            fi
 
             mkdir -p "$stage/bin"
 
-            cp -v "Release/Luau.Ast.lib" "$stage/lib/release/"
-            cp -v "Release/Luau.CodeGen.lib" "$stage/lib/release/"
-            cp -v "Release/Luau.Compiler.lib" "$stage/lib/release/"
-            cp -v "Release/Luau.Config.lib" "$stage/lib/release/"
-            cp -v "Release/Luau.VM.lib" "$stage/lib/release/"
+            cp -v "Luau.Ast.lib" "$stage/lib/release/"
+            cp -v "Luau.CodeGen.lib" "$stage/lib/release/"
+            cp -v "Luau.Compiler.lib" "$stage/lib/release/"
+            cp -v "Luau.Config.lib" "$stage/lib/release/"
+            cp -v "Luau.VM.lib" "$stage/lib/release/"
 
-            cp -v Release/luau.exe "$stage/bin/"
+            cp -v luau.exe "$stage/bin/"
         ;;
-        darwin*|linux64*)
-            cmake -DCMAKE_INSTALL_PREFIX:STRING="${stage}" \
+        darwin*)
+            export MACOSX_DEPLOYMENT_TARGET="$LL_BUILD_DARWIN_DEPLOY_TARGET"
+
+            cmake -G Ninja -DCMAKE_BUILD_TYPE="Release" \
+                  -DCMAKE_INSTALL_PREFIX:STRING="${stage}" \
+                  -DCMAKE_CXX_FLAGS="$LL_BUILD_RELEASE" \
+                  -DCMAKE_C_FLAGS="$(remove_cxxstd $LL_BUILD_RELEASE)" \
+                  -DCMAKE_OSX_ARCHITECTURES="x86_64" \
+                  -DCMAKE_OSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET} \
+                  ../luau
+            cmake --build . --config Release
+
+            # conditionally run unit tests
+            if [ "${DISABLE_UNIT_TESTS:-0}" = "0" ]; then
+                ./Luau.UnitTest
+                ./Luau.Conformance
+                ./Luau.UnitTest --fflags=true
+                ./Luau.Conformance --fflags=true
+                ./Luau.Conformance -O2
+                ./Luau.Conformance -O2 --fflags=true
+                ./Luau.Conformance --codegen
+                ./Luau.Conformance --codegen --fflags=true
+                ./Luau.Conformance --codegen -O2
+                ./Luau.Conformance --codegen -O2 --fflags=true
+                ./luau ../luau/tests/conformance/assert.lua
+                ./luau-analyze ../luau/tests/conformance/assert.lua
+                ./luau-compile ../luau/tests/conformance/assert.lua
+            fi
+
+            cp -v "libLuau.Ast.a" "$stage/lib/release"
+            cp -v "libLuau.CodeGen.a" "$stage/lib/release"
+            cp -v "libLuau.Compiler.a" "$stage/lib/release"
+            cp -v "libLuau.Config.a" "$stage/lib/release"
+            cp -v "libLuau.VM.a" "$stage/lib/release"
+        ;;
+        linux64*)
+            cmake -G Ninja -DCMAKE_BUILD_TYPE="Release" \
+                  -DCMAKE_INSTALL_PREFIX:STRING="${stage}" \
                   -DCMAKE_CXX_FLAGS="$LL_BUILD_RELEASE" \
                   -DCMAKE_C_FLAGS="$(remove_cxxstd $LL_BUILD_RELEASE)" \
                   ../luau
-            cmake --build . --target Luau.Repl.CLI
+            cmake --build . --config Release
+
+            # conditionally run unit tests
+            if [ "${DISABLE_UNIT_TESTS:-0}" = "0" ]; then
+                ./Luau.UnitTest
+                ./Luau.Conformance
+                ./Luau.UnitTest --fflags=true
+                ./Luau.Conformance --fflags=true
+                ./Luau.Conformance -O2
+                ./Luau.Conformance -O2 --fflags=true
+                ./Luau.Conformance --codegen
+                ./Luau.Conformance --codegen --fflags=true
+                ./Luau.Conformance --codegen -O2
+                ./Luau.Conformance --codegen -O2 --fflags=true
+                ./luau ../luau/tests/conformance/assert.lua
+                ./luau-analyze ../luau/tests/conformance/assert.lua
+                ./luau-compile ../luau/tests/conformance/assert.lua
+            fi
 
             cp -v "libLuau.Ast.a" "$stage/lib/release"
             cp -v "libLuau.CodeGen.a" "$stage/lib/release"
@@ -85,6 +153,5 @@ pushd "$top/luau"
     esac
 popd
 
-echo "$LUAU_VERSION-$build" > "$stage/VERSION.txt"
 mkdir -p "$stage/LICENSES"
 cp "$top/LICENSE" "$stage/LICENSES/luau.txt"
