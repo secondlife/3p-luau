@@ -1,22 +1,30 @@
 name: Build
-
 on:
   pull_request:
   push:
     branches: [main]
-    tags: ["v*.*"]
-
+    tags: [v*]
 jobs:
   build:
     strategy:
       matrix:
-        os: [windows-2022, macos-13, ubuntu-22.04]
+        os: [windows-2022, macos-12, ubuntu-22.04]
+        addrsize: ["64"]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: secondlife/action-autobuild@v3
+      - name: Setup Homebrew Packages
+        if: ${{ runner.os == 'macOS' }}
+        shell: bash
+        run: brew install ninja
+      - name: Setup Apt Packages
+        if: ${{ runner.os == 'Linux' }}
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get -y install ninja-build
+      - uses: secondlife/action-autobuild@v4
         with:
-          addrsize: "64"
-
+          addrsize: ${{ matrix.addrsize }}
   release:
     needs: build
     runs-on: [ubuntu-latest]
