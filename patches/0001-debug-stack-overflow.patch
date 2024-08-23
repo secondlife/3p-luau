@@ -1,0 +1,170 @@
+diff --git a/VM/src/lapi.cpp b/VM/src/lapi.cpp
+index 87f85af8..c19f0d36 100644
+--- a/VM/src/lapi.cpp
++++ b/VM/src/lapi.cpp
+@@ -13,6 +13,7 @@
+ #include "lnumutils.h"
+ #include "lbuffer.h"
+ 
++#include <cstdio>
+ #include <string.h>
+ 
+ /*
+@@ -132,11 +133,156 @@ void luaA_pushobject(lua_State* L, const TValue* o)
+     api_incr_top(L);
+ }
+ 
++// RAII class to set specified variable to specified value
++// only for the duration of containing scope
++template <typename VAR, typename VALUE>
++class TempSet
++{
++public:
++    TempSet(VAR& var, const VALUE& value):
++        mVar(var),
++        mOldValue(mVar)
++    {
++        mVar = value;
++    }
++
++    TempSet(const TempSet&) = delete;
++    TempSet& operator=(const TempSet&) = delete;
++
++    ~TempSet()
++    {
++        mVar = mOldValue;
++    }
++
++private:
++    VAR& mVar;
++    VAR mOldValue;
++};
++
+ int lua_checkstack(lua_State* L, int size)
+ {
++    // TOOMUCHSTACK is a hack to help us debug #2237 stack overflow. We make
++    // the default overflow test overly sensitive, before we actually run out.
++    // Because we then want to use additional Lua stack for diagnosis, once we
++    // hit that condition we bump it back up to the original limit for
++    // re-entrant calls.
++    static int TOOMUCHSTACK = 500;
+     int res = 1;
+-    if (size > LUAI_MAXCSTACK || (L->top - L->base + size) > LUAI_MAXCSTACK)
++//  if (size > LUAI_MAXCSTACK || (L->top - L->base + size) > LUAI_MAXCSTACK)
++    if (size > LUAI_MAXCSTACK || (L->top - L->base + size) > TOOMUCHSTACK)
++    {
+         res = 0; // stack overflow
++        std::printf("\n==================== Stack overflow\n");
++        lua_State *ML = lua_mainthread(L);
++        if (ML == L)
++        {
++            std::printf("L is main thread: %p\n", L);
++        }
++        else
++        {
++            std::printf("L is coroutine %p of main thread %p\n", L, ML);
++        }
++        std::printf("LUAI_MAXCSTACK = %d\n", LUAI_MAXCSTACK);
++        std::printf("requested size = %d\n", size);
++        std::printf("stack span = %d, stacksize = %d\n",
++                    int(L->stack_last - L->stack), L->stacksize);
++        std::printf("function base = %d, top = %d\n",
++                    int(L->base - L->stack), int(L->top - L->base));
++        std::printf("nested C calls = %u\n", L->nCcalls);
++        // The following code necessarily uses additional Lua stack space,
++        // which is why we engage it at TOOMUCHSTACK existing stack entries
++        // instead of letting the stack grow to LUAI_MAXCSTACK (8000) first.
++        // Temporarily bump TOOMUCHSTACK so we have room to work.
++        TempSet bump(TOOMUCHSTACK, LUAI_MAXCSTACK);
++        // Also disable Lua interrupts while we're working on this.
++        TempSet disint(lua_callbacks(L)->interrupt, nullptr);
++        // See if the inspect function has been loaded.
++        lua_getglobal(L, "inspect");
++        // stack: (TOOMUCHSTACK items), inspect (which might be nil)
++        if (lua_isnil(L, -1))
++        {
++            // ditch nil
++            lua_pop(L, 1);
++            lua_getglobal(L, "require");
++            if (lua_isnil(L, -1))
++            {
++                std::printf("Can't even find require()?!\n");
++            }
++            else
++            {
++                std::printf("require(inspect)\n");
++                // stack: (TOOMUCHSTACK items), require
++                lua_pushstring(L, "inspect");
++                // stack: (TOOMUCHSTACK items), require, "inspect"
++                // one argument, no return, no error function
++                lua_pcall(L, 1, 0, 0);
++                // stack: (TOOMUCHSTACK items), inspect
++            }
++        }
++        // 'inspect' is actually a callable table, so lua_isfunction() doesn't
++        // work, but it's too much trouble to also check for a metatable with
++        // a __call() function. If it's a table, trust that it's the right thing.
++        if (! lua_istable(L, -1))
++        {
++            std::printf("For partial data stack dump, install inspect module "
++                        "(inspect is %s)\n", lua_typename(L, lua_type(L, -1)));
++        }
++        else                  // stack: (TOOMUCHSTACK items), inspect function
++        {
++            // report the most recent entries
++            std::printf("Data stack:\n");
++            for (int i = -1; i >= -50; --i)
++            {
++                // Since lua_pcall() pops the function from the stack, copy
++                // inspect.
++                lua_pushvalue(L, -1);
++                // stack: (TOOMUCHSTACK items), inspect, inspect
++                // Push inspect()'s argument. Since the top two items are the
++                // inspect function, offset i by -2 to find the indexed data
++                // item below them.
++                lua_pushvalue(L, i-2);
++                // stack: (TOOMUCHSTACK items), inspect, inspect, stack[i-2]
++                // one argument, one result, no error function
++                lua_pcall(L, 1, 1, 0);
++                // stack: (TOOMUCHSTACK items), inspect, inspect result
++                // print result (even if it's an error message)
++                std::printf("%4d %s\n", i, lua_tostring(L, -1));
++                // don't pop inspect result until AFTER we've finished looking
++                // at the string
++                lua_pop(L, 1);
++                // stack: (TOOMUCHSTACK items), inspect
++            }
++            std::printf("...\n");
++        }
++        // ditch inspect (whether function or nil)
++        lua_pop(L, 1);
++        std::printf("Call stack:\n");
++        lua_getglobal(L, "debug");
++        // stack: (TOOMUCHSTACK items), debug (which might be nil)
++        if (! lua_istable(L, -1))
++        {
++            // unless 'debug' is a table, we can't use it
++            lua_pop(L, 1);
++            std::printf("Can't find debug.traceback()\n");
++        }
++        else
++        {
++            // debug is a table: get its 'traceback' field
++            lua_getfield(L, -1, "traceback");
++            // ditch 'debug'
++            lua_remove(L, -2);
++            // stack: (TOOMUCHSTACK items), debug.traceback
++            // no arguments, one return, no error function
++            lua_pcall(L, 0, 1, 0);
++            // print result (even if it's an error message)
++            std::printf("%s\n", lua_tostring(L, -1));
++            // pop result AFTER we've finished looking at the string
++            lua_pop(L, 1);
++            // stack: (TOOMUCHSTACK items)
++        }
++        std::printf("==================== end stack overflow\n");
++        // returning from this resets TOOMUCHSTACK
++    }
+     else if (size > 0)
+     {
+         luaD_checkstack(L, size);
