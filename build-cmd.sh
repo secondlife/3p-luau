@@ -87,37 +87,58 @@ pushd "$top/luau"
         darwin*)
             export MACOSX_DEPLOYMENT_TARGET="$LL_BUILD_DARWIN_DEPLOY_TARGET"
 
-            cmake -G Ninja -DCMAKE_BUILD_TYPE="Release" \
-                  -DCMAKE_INSTALL_PREFIX:STRING="${stage}" \
-                  -DCMAKE_CXX_FLAGS="$LL_BUILD_RELEASE" \
-                  -DCMAKE_C_FLAGS="$(remove_cxxstd $LL_BUILD_RELEASE)" \
-                  -DCMAKE_OSX_ARCHITECTURES="x86_64" \
-                  -DCMAKE_OSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET} \
-                  ../luau
-            cmake --build . --config Release
+            for arch in x86_64 arm64 ; do
+                ARCH_ARGS="-arch $arch"
+                opts="${TARGET_OPTS:-$ARCH_ARGS $LL_BUILD_RELEASE}"
+                cc_opts="$(remove_cxxstd $opts)"
+                ld_opts="$ARCH_ARGS"
 
-            # conditionally run unit tests
-            if [ "${DISABLE_UNIT_TESTS:-0}" = "0" ]; then
-                ./Luau.UnitTest
-                ./Luau.Conformance
-                ./Luau.UnitTest --fflags=true
-                ./Luau.Conformance --fflags=true
-                ./Luau.Conformance -O2
-                ./Luau.Conformance -O2 --fflags=true
-                ./Luau.Conformance --codegen
-                ./Luau.Conformance --codegen --fflags=true
-                ./Luau.Conformance --codegen -O2
-                ./Luau.Conformance --codegen -O2 --fflags=true
-                ./luau ../luau/tests/conformance/assert.lua
-                ./luau-analyze ../luau/tests/conformance/assert.lua
-                ./luau-compile ../luau/tests/conformance/assert.lua
-            fi
+                mkdir -p "build_$arch"
+                pushd "build_$arch"
+                    CFLAGS="$cc_opts" \
+                    CXXFLAGS="$opts" \
+                    LDFLAGS="$ld_opts" \
+                    cmake -G Ninja -DCMAKE_BUILD_TYPE="Release" \
+                        -DCMAKE_INSTALL_PREFIX:STRING="${stage}" \
+                        -DCMAKE_CXX_FLAGS="$opts" \
+                        -DCMAKE_C_FLAGS="$cc_opts" \
+                        -DCMAKE_OSX_ARCHITECTURES="$arch" \
+                        -DCMAKE_OSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET} \
+                        ../../luau
+                    cmake --build . --config Release
 
-            cp -v "libLuau.Ast.a" "$stage/lib/release"
-            cp -v "libLuau.CodeGen.a" "$stage/lib/release"
-            cp -v "libLuau.Compiler.a" "$stage/lib/release"
-            cp -v "libLuau.Config.a" "$stage/lib/release"
-            cp -v "libLuau.VM.a" "$stage/lib/release"
+                    # conditionally run unit tests
+                    if [ "${DISABLE_UNIT_TESTS:-0}" = "0" ]; then
+                        ./Luau.UnitTest
+                        ./Luau.Conformance
+                        ./Luau.UnitTest --fflags=true
+                        ./Luau.Conformance --fflags=true
+                        ./Luau.Conformance -O2
+                        ./Luau.Conformance -O2 --fflags=true
+                        ./Luau.Conformance --codegen
+                        ./Luau.Conformance --codegen --fflags=true
+                        ./Luau.Conformance --codegen -O2
+                        ./Luau.Conformance --codegen -O2 --fflags=true
+                        ./luau ../../luau/tests/conformance/assert.lua
+                        ./luau-analyze ../../luau/tests/conformance/assert.lua
+                        ./luau-compile ../../luau/tests/conformance/assert.lua
+                    fi
+
+                    mkdir -p "$stage/lib/release/$arch"
+                    cp -v "libLuau.Ast.a" "$stage/lib/release/$arch"
+                    cp -v "libLuau.CodeGen.a" "$stage/lib/release/$arch"
+                    cp -v "libLuau.Compiler.a" "$stage/lib/release/$arch"
+                    cp -v "libLuau.Config.a" "$stage/lib/release/$arch"
+                    cp -v "libLuau.VM.a" "$stage/lib/release/$arch"
+                popd
+            done
+
+            # Create universal libraries
+            lipo -create -output ${stage}/lib/release/libLuau.Ast.a ${stage}/lib/release/x86_64/libLuau.Ast.a ${stage}/lib/release/arm64/libLuau.Ast.a
+            lipo -create -output ${stage}/lib/release/libLuau.CodeGen.a ${stage}/lib/release/x86_64/libLuau.CodeGen.a ${stage}/lib/release/arm64/libLuau.CodeGen.a
+            lipo -create -output ${stage}/lib/release/libLuau.Compiler.a ${stage}/lib/release/x86_64/libLuau.Compiler.a ${stage}/lib/release/arm64/libLuau.Compiler.a
+            lipo -create -output ${stage}/lib/release/libLuau.Config.a ${stage}/lib/release/x86_64/libLuau.Config.a ${stage}/lib/release/arm64/libLuau.Config.a
+            lipo -create -output ${stage}/lib/release/libLuau.VM.a ${stage}/lib/release/x86_64/libLuau.VM.a ${stage}/lib/release/arm64/libLuau.VM.a
         ;;
         linux64*)
             cmake -G Ninja -DCMAKE_BUILD_TYPE="Release" \
